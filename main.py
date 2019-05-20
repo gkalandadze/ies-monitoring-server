@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
-# import sys
+import sys
 import socket
 import threading
 import json
@@ -13,16 +13,16 @@ import logging
 # სერვერის ip მისამართი
 server_ip = "10.0.0.20"
 
-# სერვეროს პორტი, რომელზეც ვუსმენთ client-ების შეტყობინებებს
+# სერვერის პორტი, რომელზეც ვუსმენთ client-ების შეტყობინებებს
 port = 12345
+
 # socket - ებიექტის შექმნა
 socket_object = socket.socket()
 
 # შეტყობინებების მაქსიმალური ზომა ბაიტებში
 buffer_size = 8192
 
-# must_close გლობალური ცვლადის საშუალებით გაშვებული thread-ები ხვდებიან რო
-# უნდა დაიხურონ
+# must_close გლობალური ცვლადის საშუალებით გაშვებული thread-ები ხვდებიან რო უნდა დაიხურონ
 must_close = False
 
 # mysql სერვერის ip
@@ -40,29 +40,79 @@ mysql_server_user = os.environ.get('mysql_server_user')
 # mysql სერვერის მომხმარებლის პაროლი (მოთავსებულია .bashrc ფაილში)
 mysql_user_pass = os.environ.get('mysql_user_pass')
 
+# log ფაილის დასახელება
+log_filename = "LOG"
+
+
+class ConsoleFormatter(logging.Formatter):
+    """
+    კლასით განვსაზღვრავთ ტერმინალში გამოტანილი მესიჯის ფორმატს.
+
+    """
+    date_format = "%H:%M:%S"
+    default_format = "%(asctime)s [%(levelname)s] %(msg)s"
+    info_format = "%(msg)s"
+
+    def __init__(self):
+        super().__init__(fmt=ConsoleFormatter.default_format, datefmt=ConsoleFormatter.date_format, style='%')
+
+    def format(self, record):
+        # დავიმახსოვროთ თავდაპირველი ფორმატი
+        format_orig = self._style._fmt
+
+        if record.levelno == logging.INFO:
+            self._style._fmt = ConsoleFormatter.info_format
+
+        # შევცვალოთ თავდაპირველი ფორმატი
+        result = logging.Formatter.format(self, record)
+
+        # დავაბრუნოთ თავდაპირველი ფორმატი
+        self._style._fmt = format_orig
+
+        return result
+
+
+def get_script_argument():
+    """სკრიპტისთვის მიწოდებული არგუმენტის დაჭერა"""
+
+    try:
+        log_level = sys.argv[1]
+        return(log_level)
+    except Exception as ex:
+        log_level = ""
+        return(log_level)
+
+
 # logger შექმნა
 logger = logging.getLogger('ies_monitoring_server_logger')
 logger.setLevel(logging.DEBUG)
 
-# შევქმნათ console handler - ი და განვსაზღვროთ დონე
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.DEBUG)
-console_handler_formatter = logging.Formatter('%(levelname)s - %(message)s')
-console_handler.setFormatter(console_handler_formatter)
+# შევქმნათ console handler - ი და განვსაზღვროთ დონე და ფორმატი
+console_handler = logging.StreamHandler(sys.stdout)
+if get_script_argument() == "--debug":
+    console_handler.setLevel(logging.DEBUG)
+else:
+    console_handler.setLevel(logging.INFO)
+console_formatter = ConsoleFormatter()
+console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
 
 # FileHandler - ის შექმნა. დონის და ფორმატის განსაზღვრა
-log_file_handler = logging.FileHandler('LOG')
-log_file_handler.setLevel(logging.WARNING)
-log_file_formatter = logging.Formatter(
-    '%(asctime)s - %(levelname)s - %(message)s')
+log_file_handler = logging.FileHandler(log_filename)
+log_file_handler.setLevel(logging.DEBUG)
+log_file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 log_file_handler.setFormatter(log_file_formatter)
 logger.addHandler(log_file_handler)
 
 
-def connection_close(connection):
+def connection_close(connection, addr=None):
     """ხურავს (კავშირს სერვერთან) პარამეტრად გადაცემულ connection socket ობიექტს"""
 
+    # print(dir(connection))
+    if addr is None:
+        logger.debug("სოკეტის დახურვა " + str(connection.getsockname()))
+    else:
+        logger.debug("კლიენტთან კავშირის დახურვა " + str(addr))
     connection.shutdown(socket.SHUT_RDWR)
     connection.close()
 
@@ -76,16 +126,17 @@ def start_listening():
     # მოსმენის დაწყება
     socket_object.bind((server_ip, port))
 
-    # ვუთითებთ მაქსიმალურ კლიენტების რაოდენობას ვინც ელოდება კავშირის
-    # დამყარებაზე თანხმობას
+    # ვუთითებთ მაქსიმალურ კლიენტების რაოდენობას ვინც ელოდება კავშირის დამყარებაზე თანხმობას
     socket_object.listen(10)
+
+    logger.debug("სოკეტის ინიციალიზაცია")
 
 
 def accept_connections():
     """ ფუნქცია ელოდება client-ებს და ამყარებს კავშირს.
     კავშირის დათანხმების შემდეგ იძახებს connection_hendler - ფუნქციას """
 
-    logger.debug('Ready for accept connections...')
+    logger.info("პროგრამა მზად არის შეტყობინების მისაღებად...")
 
     while True:
         try:
@@ -94,10 +145,8 @@ def accept_connections():
 
             # თითოეულ დაკავშირებულ client-ისთვის შევქმნათ და გავუშვათ
             # ცალკე thread-ი client_handler_thread ფუნქციის საშუალებით
-            threading.Thread(target=client_handler_thread,
-                             args=(connection, addr)).start()
+            threading.Thread(target=client_handler_thread, args=(connection, addr)).start()
         except Exception as err:
-            logger.exception("accept_connections - ში მოხდა შეცდომა")
             pass
 
         # შევამოწმოთ თუ must_close არის True
@@ -112,7 +161,7 @@ def bytes_to_dictionary(json_text):
     return json.loads(json_text.decode("utf-8"))
 
 
-def insert_message_into_mysql(message, addr):
+def insert_message_into_mysql(message):
     """ მესიჯის ჩაწერა მონაცემთა ბაზაში """
 
     # mysql ბაზასთან კავშირის დამყარების ცდა
@@ -123,8 +172,7 @@ def insert_message_into_mysql(message, addr):
 
     # თუ ვერ დაუკავშირდა mysql-ს
     if not mysql_connection:
-        logger.error(
-            "ვერ დაუკავშირდა mysql ბაზას და არ ჩაიწერა შემდეგი მესიჯი ბაზაში:" + message_id)
+        logger.error("არ ჩაიწერა შემდეგი მესიჯი ბაზაში: " + str(message))
         return
 
     # წავიკითხოთ შეტყობინების დრო
@@ -137,10 +185,7 @@ def insert_message_into_mysql(message, addr):
     text = message["text"]
 
     # წავიკითხოთ Client-ის ip მისამართი საიდანაც მოვიდა შეტყობინება
-    # client_ip = message["client_ip"]
-    client_ip = addr[0]
-    # print(addr[0])
-    # print(type(addr))
+    client_ip = message["client_ip"]
 
     # წავიკითხოთ client-ის სკრიპტის სახელი საიდანაც მოვიდა შეტყობინება
     client_script_name = message["client_script_name"]
@@ -151,8 +196,11 @@ def insert_message_into_mysql(message, addr):
                                                        text, client_ip, client_script_name)
 
     cursor = mysql_connection.cursor()
-    cursor.execute(insert_statement)
-    mysql_connection.commit()
+    try:
+        cursor.execute(insert_statement)
+        mysql_connection.commit()
+    except Exception as ex:
+        logger.error("არ ჩაიწერა შემდეგი მესიჯი ბაზაში: " + str(message) + "\n" + str(ex))
     cursor.close()
     mysql_connection.close()
 
@@ -161,7 +209,7 @@ def client_handler_thread(connection, addr):
     """ client-თან კავშირის დამყარების შემდეგ ფუნქცია კითხულობს მის შეტყობინებას """
 
     # გამოაქვს დაკავშირებული კლიენტის მისამართი
-    logger.info(f"Got connection from {addr}")
+    logger.debug("კავშირი დამყარდა " + str(addr) + " - თან")
 
     while True:
         # ციკლის შეჩერება 0.5 წამით
@@ -174,26 +222,22 @@ def client_handler_thread(connection, addr):
         if not json_message.decode("utf-8"):
             continue
         else:
-            # წაკითხული შეტყობინება bytes ობიექტიდან გადავიყვანოთ dictionary
-            # ობიექტში
+            # წაკითხული შეტყობინება bytes ობიექტიდან გადავიყვანოთ dictionary ობიექტში
             message = bytes_to_dictionary(json_message)
 
+            logger.debug(str(addr) + " - დან მიღებული შეტყობინება: " + str(message))
             # მესიჯის ჩაწერა მონაცემთა ბაზაში
-            insert_message_into_mysql(message, addr)
+            insert_message_into_mysql(message)
 
-            # clien-ს გავუგზავნოთ მესიჯის id იმის პასუხად რომ შეტყობინება
-            # მივიღეთ
+            # clien-ს გავუგზავნოთ მესიჯის id იმის პასუხად რომ შეტყობინება მივიღეთ
             connection.send(bytes(message["message_id"], "utf-8"))
             # წასაშლელია
-            logger.info(f"sending : {message['message_id']}")
+            logger.debug(str(addr) + " - თვის პასუხის დაბრუნება: " + message["message_id"])
 
             # წაკითხული შეტყობინების მერე დავხუროთ კავშირი
-            connection.close()
+            connection_close(connection, addr)
 
-            logger.info(f"Closed client connection {addr}")
-
-            # გამოვიდეთ ციკლიდან რაც გულისხმობს client_handler_thread
-            # დასრულებას და შესაბამისი Thread-ის დახურვას
+            # გამოვიდეთ ციკლიდან რაც გულისხმობს client_handler_thread დასრულებას და შესაბამისი Thread-ის დახურვას
             break
 
 
@@ -206,13 +250,11 @@ def command_listener():
         # დაველოდოთ მომხმარებლის ბრძანებას
         command = input("")
 
-        # თუ მომხმარებლის მიერ შეყვანილი ბრძანება არის `exit` დავხუროთ პროგრამა
-        # და socket_object ობიექტი
+        # თუ მომხმარებლის მიერ შეყვანილი ბრძანება არის `exit` დავხუროთ პროგრამა და socket_object ობიექტი
         if command == "exit":
             must_close = True
-            logger.info("Bye...")
             connection_close(socket_object)
-            # time.sleep(3)
+            logger.info("Bye...")
             break
 
 
@@ -225,16 +267,15 @@ def connect_to_mysql():
                                            mysql_user_pass,
                                            mysql_database_name,
                                            port=mysql_server_port)
-        logger.info("Connection to mysql database established")
+        logger.debug("მონაცემთა ბაზასთან კავშირი დამყარებულია")
     except Exception as ex:
-        print(ex)
+        logger.error("მონაცემთა ბაზასთან კავშირი წარუმატებელია\n" + str(ex))
         return False
     return mysql_connection
 
 
 def main():
     """ მთავარი ფუნქცია რომელიც ეშვება პირველი პროგრამის ჩართვის დროს """
-
     # mysql - თან დაკავშირება
     # global mysql_connection
     # mysql_connection = connect_to_mysql()
@@ -247,8 +288,7 @@ def main():
     # გავხსნათ პორტი და დაველოდოთ client-ის დაკავშირებას
     start_listening()
 
-    # შევქმნათ thread-ი accept_connections ფუნქციის საშუალებით რომელიც
-    # ამყარებს კავშირს client-ებთან
+    # შევქმნათ thread-ი accept_connections ფუნქციის საშუალებით რომელიც ამყარებს კავშირს client-ებთან
     threading.Thread(target=accept_connections).start()
 
     # დავიწყოთ მომხმარებლის ბრძანებების მოსმენა
