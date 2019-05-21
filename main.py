@@ -100,7 +100,7 @@ logger.addHandler(console_handler)
 # FileHandler - ის შექმნა. დონის და ფორმატის განსაზღვრა
 log_file_handler = logging.FileHandler(log_filename)
 log_file_handler.setLevel(logging.DEBUG)
-log_file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+log_file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s \n")
 log_file_handler.setFormatter(log_file_formatter)
 logger.addHandler(log_file_handler)
 
@@ -199,6 +199,7 @@ def insert_message_into_mysql(message):
     try:
         cursor.execute(insert_statement)
         mysql_connection.commit()
+        logger.debug("შეტყობინება ჩაიწერა ბაზაში. შეტყობინების ID: " + message["message_id"])
     except Exception as ex:
         logger.error("არ ჩაიწერა შემდეგი მესიჯი ბაზაში: " + str(message) + "\n" + str(ex))
     cursor.close()
@@ -254,7 +255,7 @@ def command_listener():
         if command == "exit":
             must_close = True
             connection_close(socket_object)
-            logger.info("Bye...")
+            logger.info("პროგრამის გათიშვა")
             break
 
 
