@@ -85,9 +85,8 @@ class ConsoleFormatter(logging.Formatter):
 
 
 parser = argparse.ArgumentParser(description="Set log level")
-parser.add_argument("debug", default="--info", help="set logging level to debug")
+parser.add_argument('-d', '--debug', action='store_true', help='set logging level to debug')
 args = parser.parse_args()
-print(args.debug)
 
 # logger შექმნა
 logger = logging.getLogger('ies_monitoring_server_logger')
@@ -95,10 +94,10 @@ logger.setLevel(logging.DEBUG)
 
 # შევქმნათ console handler - ი და განვსაზღვროთ დონე და ფორმატი
 console_handler = logging.StreamHandler(sys.stdout)
-# if get_script_argument() == "--debug":
-console_handler.setLevel(logging.DEBUG)
-# else:
-# console_handler.setLevel(logging.INFO)
+if args.debug:
+    console_handler.setLevel(logging.DEBUG)
+else:
+    console_handler.setLevel(logging.INFO)
 console_formatter = ConsoleFormatter()
 console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
